@@ -22,7 +22,8 @@ trap cleanup EXIT
 
 BIN="${1:-}"
 if [ -z "$BIN" ]; then
-  url="https://github.com/router-for-me/CLIProxyAPI/releases/download/v${CPA_VERSION}/CLIProxyAPI_${CPA_VERSION}_${GOOS}_${GOARCH}.tar.gz"
+  asset_arch="$GOARCH"; [ "$GOARCH" = arm64 ] && asset_arch=aarch64   # the release names arm64 "aarch64"
+  url="https://github.com/router-for-me/CLIProxyAPI/releases/download/v${CPA_VERSION}/CLIProxyAPI_${CPA_VERSION}_${GOOS}_${asset_arch}.tar.gz"
   curl -fsSL "$url" | tar -xz -C "$WORK"
   BIN="$WORK/cli-proxy-api"
 fi
