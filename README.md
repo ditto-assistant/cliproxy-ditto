@@ -122,7 +122,9 @@ fake subscription credential serving `claude-opus-5-5`, and checks three cases:
    using the Ditto key and never the client's.
 3. Streaming events arrive intact.
 
-CI runs it on Linux amd64 and macOS arm64.
+`ci/github-actions.yml` runs it on Linux amd64 and macOS arm64. It is not wired
+up yet: it moves to `.github/workflows/` with a push from a token that has the
+`workflow` scope.
 
 ## License
 
