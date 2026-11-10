@@ -12,7 +12,8 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v8/sdk/pluginapi"
 )
 
-// credits is the Router's GET /v1/credits document for an endpoint key.
+// credits is the Router's GET /v1/credits document for an endpoint key,
+// which arrives wrapped in {"data": ...}.
 type credits struct {
 	Currency    string        `json:"currency"`
 	BillingMode string        `json:"billing_mode"`
@@ -105,9 +106,11 @@ func fetchQuota(raw []byte) ([]byte, error) {
 	if resp.StatusCode != http.StatusOK {
 		return upstreamError(resp.StatusCode, body), nil
 	}
-	var doc credits
+	var doc struct {
+		Data credits `json:"data"`
+	}
 	if err := json.Unmarshal(body, &doc); err != nil {
 		return errorEnvelope("upstream_error", "decode Ditto credits: "+err.Error(), 502), nil
 	}
-	return okEnvelope(quotaFromCredits(doc))
+	return okEnvelope(quotaFromCredits(doc.Data))
 }

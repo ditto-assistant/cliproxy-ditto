@@ -122,7 +122,19 @@ fake subscription credential serving `claude-opus-5-5`, and checks three cases:
    using the Ditto key and never the client's.
 3. Streaming events arrive intact.
 
-`ci/github-actions.yml` runs it on Linux amd64 and macOS arm64. It is not wired
+To check against the real Router, mint a short-lived capped key and run the
+live variants. They spend a few cents on the endpoint's routing:
+
+```bash
+heyditto endpoints keys create <endpoint> --store file --key-file "$PWD/.tmp/live/<endpoint>.key" \
+  --expires 1h --budget 5000000 --spend-period never --yes      # needs a private (0700) .tmp/live
+export DITTO_KEY_FILE="$PWD/.tmp/live/<endpoint>.key" DITTO_ENDPOINT=<endpoint>
+go test -tags live -run Live -v .   # /v1/models and /v1/credits as the plugin reads them
+bash test/e2e/live.sh               # Messages (plain and streaming) after a 429, Responses and Chat Completions by slug
+heyditto endpoints keys revoke <endpoint> <key-id> --yes
+```
+
+`ci/github-actions.yml` runs the offline test on Linux amd64 and macOS arm64. It is not wired
 up yet: it moves to `.github/workflows/` with a push from a token that has the
 `workflow` scope.
 

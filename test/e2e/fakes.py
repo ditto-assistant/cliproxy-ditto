@@ -100,8 +100,8 @@ class Ditto(Base):
                 {"id": "anthropic/claude-opus-4.5", "object": "model", "owned_by": "anthropic"},
             ]})
         elif self.path == "/v1/credits":
-            self.send(200, {"currency": "usd", "billing_mode": "ditto", "balance": 42.0,
-                            "endpoint": {"limit": 10, "limit_remaining": 4, "limit_reset": "monthly", "usage": 6}})
+            self.send(200, {"data": {"currency": "usd", "billing_mode": "ditto", "balance": 42.0,
+                            "endpoint": {"limit": 10, "limit_remaining": 4, "limit_reset": "monthly", "usage": 6}}})
         else:
             self.send(404, {"error": {"message": "no route"}})
 

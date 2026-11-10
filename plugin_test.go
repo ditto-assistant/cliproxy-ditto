@@ -35,7 +35,7 @@ func (f *fakeRouter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, `{"object":"list","data":[{"id":"ditto-dev","owned_by":"ditto"},{"id":"fast","owned_by":"ditto"},{"id":"anthropic/claude-opus-4.5","owned_by":"anthropic"}]}`)
 		return
 	case "/v1/credits":
-		_, _ = io.WriteString(w, `{"currency":"usd","billing_mode":"byok","balance":12.5,"endpoint":{"limit":20,"limit_remaining":5,"limit_reset":"monthly","usage":15},"limit":null,"usage":3}`)
+		_, _ = io.WriteString(w, `{"data":{"currency":"usd","billing_mode":"byok","balance":12.5,"endpoint":{"limit":20,"limit_remaining":5,"limit_reset":"monthly","usage":15},"limit":null,"usage":3}}`)
 		return
 	}
 	if f.status != 0 {
