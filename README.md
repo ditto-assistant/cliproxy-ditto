@@ -200,9 +200,13 @@ edit to the endpoint, and from time to time, since the Router can gain
 settings this check does not know about:
 `heyditto endpoints show <endpoint> --output json | python3 -I scripts/classifier_safe.py`.
 
-**Rollback.** Delete the credential file (or set `"disabled": true` in it),
-drop the alias, and launch without `--auto-mode-classifier`. Each piece alone
-returns checks to Claude.
+**Rollback**, in this order. First launch without `--auto-mode-classifier`
+(or re-run `heyditto t3 setup` without it) and restart running chats, which
+keep the id they started with; checks return to Claude Code's default
+classifier. Then delete the credential file or set `"disabled": true`; any
+check still naming the id goes to the Claude fallback. Drop the alias last,
+if at all. Removing it while the credential is live leaves every refused
+check without a fallback, and Claude Code blocks those actions.
 
 ## Development
 
