@@ -23,6 +23,7 @@ def record(who, handler, body):
         "x_api_key": handler.headers.get("x-api-key", ""),
         "via": handler.headers.get("X-Ditto-Via", ""),
         "anthropic_version": handler.headers.get("anthropic-version", ""),
+        "request_class": handler.headers.get("x-claude-code-request-class", ""),
         "body": body.decode("utf-8", "replace"),
     }
     with lock, open(LOG, "a") as f:
@@ -111,8 +112,17 @@ class Ditto(Base):
         if self.headers.get("Authorization") != "Bearer ditto_inf_e2e":
             self.send(401, {"error": {"message": "bad key"}})
             return
+        mode = os.environ.get("DITTO_MODE", "ok")
+        if mode == "400":
+            self.send(400, {"type": "error", "error": {"type": "invalid_request_error", "message": "provider returned HTTP 400: prompt is too long"}})
+            return
+        if mode == "503":
+            self.send(503, {"type": "error", "error": {"type": "overloaded_error", "message": "provider overloaded"}})
+            return
         req = json.loads(body or b"{}")
-        if req.get("stream"):
+        if mode == "empty":
+            self.send(200, {**message(""), "stop_reason": "max_tokens"})
+        elif req.get("stream"):
             self.send(200, sse("from-ditto"), "text/event-stream")
         else:
             self.send(200, message("from-ditto"))

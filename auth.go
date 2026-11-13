@@ -36,6 +36,14 @@ type credential struct {
 	BaseURL    string `json:"base_url,omitempty"`
 	Priority   *int   `json:"priority,omitempty"`
 	Disabled   bool   `json:"disabled,omitempty"`
+	// ClassifierModel dedicates this credential to Claude Code's Auto Mode
+	// permission checks (classifier.go): it serves only this model id and
+	// sends each check to Endpoint. Empty means an ordinary credential.
+	ClassifierModel string `json:"classifier_model,omitempty"`
+	// MaxInputTokens, for a classifier credential, sends checks estimated
+	// above it to the other credentials instead of cutting them. 0: no bound
+	// here; the Router or its provider refuses what does not fit.
+	MaxInputTokens int `json:"max_input_tokens,omitempty"`
 }
 
 func decodeCredential(raw []byte) (credential, error) {
@@ -51,6 +59,9 @@ func decodeCredential(raw []byte) (credential, error) {
 	}
 	if c.APIKeyFile != "" && !filepath.IsAbs(c.APIKeyFile) {
 		return c, errors.New("Ditto credential api_key_file must be an absolute path")
+	}
+	if err := validateClassifierCredential(c); err != nil {
+		return c, fmt.Errorf("Ditto credential: %w", err)
 	}
 	return c, nil
 }
@@ -96,8 +107,17 @@ func (c credential) authData(id, fileName string, raw []byte, refreshAfter time.
 		if c.Endpoint != "" {
 			label += " · " + c.Endpoint
 		}
+		if c.ClassifierModel != "" {
+			label += " (Auto Mode checks)"
+		}
 	}
 	priority := strconv.Itoa(c.priority())
+	metadata := map[string]any{"type": provider, "endpoint": c.Endpoint, "priority": c.priority()}
+	if c.ClassifierModel != "" {
+		metadata["classifier_model"] = c.ClassifierModel
+		// CLIProxy reads per-auth request-scoped rules from metadata.
+		metadata["request_scoped_errors"] = classifierScopedErrors()
+	}
 	return pluginapi.AuthData{
 		Provider:    provider,
 		ID:          id,
@@ -105,7 +125,7 @@ func (c credential) authData(id, fileName string, raw []byte, refreshAfter time.
 		Label:       label,
 		Disabled:    c.Disabled,
 		StorageJSON: append([]byte(nil), raw...),
-		Metadata:    map[string]any{"type": provider, "endpoint": c.Endpoint, "priority": c.priority()},
+		Metadata:    metadata,
 		// No "base_url" attribute: CLIProxy hands any auth carrying one to its
 		// built-in OpenAI-compatible executor instead of this plugin.
 		Attributes: map[string]string{"priority": priority, "endpoint": c.Endpoint},

@@ -147,6 +147,15 @@ func modelsForAuth(raw []byte) ([]byte, error) {
 	if err != nil {
 		return errorEnvelope("invalid_credential", err.Error(), 400), nil
 	}
+	// A classifier credential serves its one id and nothing else: mirroring
+	// would make it a fallback for the main models, and the endpoint's own
+	// ids would let other traffic reach the classifier's model.
+	if c.ClassifierModel != "" {
+		return okEnvelope(pluginapi.ModelResponse{Provider: provider, Models: []pluginapi.ModelInfo{{
+			ID: c.ClassifierModel, Object: "model", OwnedBy: provider, Type: provider,
+			DisplayName: "Ditto · " + c.Endpoint + " (Auto Mode checks)",
+		}}})
+	}
 	conf := cfg()
 	// Each source degrades on its own: a Router outage still leaves the
 	// mirrored fallback ids, and a host without the callback still leaves
