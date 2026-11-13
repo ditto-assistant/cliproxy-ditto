@@ -167,7 +167,7 @@ Prompt text is never used to decide anything.
 | Situation | Outcome |
 |---|---|
 | An `auxiliary`, non-streaming Messages request for `<id>` with a plain-text system prompt and no tools | Sent to the endpoint with only `model` changed to the endpoint slug; every other byte is forwarded as Claude Code sent it. The reply comes back untouched. |
-| Another request class, no class header, streaming, tools, an unreadable system prompt, a duplicate `model`, or over `max_input_tokens` | Refused before any Router call; CLIProxy sends the same request to the Claude fallback. |
+| Another request class, no class header, streaming, tools, an unreadable system prompt, a message with anything but text, a duplicate `model`, or over `max_input_tokens` | Refused before any Router call; CLIProxy sends the same request to the Claude fallback. |
 | Router 400, 404, 413 or 422 (for example a prompt too long for the model) | Same fallback, with no cooldown, so later checks still try the endpoint first. |
 | Router 401, 402, 429, 5xx or unreachable | CLIProxy's usual failover to the Claude fallback, and this credential cools down. |
 | A 200 with no text or a provider refusal | Same fallback: Claude Code could not have parsed a verdict from it. |
@@ -184,6 +184,21 @@ blocks are joined and `cache_control` is dropped, so the content is complete
 but the bytes are not identical, and Anthropic prompt-cache hits do not carry
 over. Measure false approvals, false blocks, malformed replies, timeouts and
 latency on your own fixtures before turning it on.
+
+**Where the data goes.** With the route on, every permission check leaves
+your machine: the security policy and the session transcript the
+classifier judges, which includes tool inputs and outputs and so can hold
+file contents or secrets, go to Ditto Router and on to the endpoint model's
+provider. `classifier_safe.py` checks that the Router neither remembers nor
+records them; it cannot see the provider's retention or training terms.
+Check those for the provider the endpoint actually routes to, and use a
+provider setting that denies data collection where one exists, before you
+turn the route on.
+
+**Upkeep.** `connect.sh` checks the endpoint once. Re-check it after any
+edit to the endpoint, and from time to time, since the Router can gain
+settings this check does not know about:
+`heyditto endpoints show <endpoint> --output json | python3 -I scripts/classifier_safe.py`.
 
 **Rollback.** Delete the credential file (or set `"disabled": true` in it),
 drop the alias, and launch without `--auto-mode-classifier`. Each piece alone

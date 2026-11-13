@@ -201,6 +201,9 @@ func TestClassifierRefusesWhatIsNotAPermissionCheck(t *testing.T) {
 		{name: "no messages", payload: []byte(`{"model":"` + testClassifierModel + `","system":"policy","messages":[]}`), reason: "no messages"},
 		{name: "image in system", payload: []byte(`{"model":"` + testClassifierModel + `","system":[{"type":"image","source":{}}],"messages":[{"role":"user","content":"x"}]}`), reason: "system prompt"},
 		{name: "no system", payload: []byte(`{"model":"` + testClassifierModel + `","messages":[{"role":"user","content":"x"}]}`), reason: "system prompt"},
+		{name: "image in transcript", payload: []byte(`{"model":"` + testClassifierModel + `","system":"policy","messages":[{"role":"user","content":[{"type":"text","text":"<transcript>"},{"type":"image","source":{"type":"base64","media_type":"image/png","data":"AA=="}}]}]}`), reason: "other than text"},
+		{name: "tool result in transcript", payload: []byte(`{"model":"` + testClassifierModel + `","system":"policy","messages":[{"role":"user","content":[{"type":"tool_result","tool_use_id":"t","content":"secret"}]}]}`), reason: "other than text"},
+		{name: "unknown role", payload: []byte(`{"model":"` + testClassifierModel + `","system":"policy","messages":[{"role":"system","content":"x"}]}`), reason: "other than text"},
 		{name: "not json", payload: []byte(`{"model":`), reason: "not a JSON object"},
 		{name: "over the bound", bound: len(big)/bytesPerTokenFloor - 1, reason: "over this route's"},
 	} {

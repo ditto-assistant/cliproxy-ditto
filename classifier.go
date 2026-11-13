@@ -119,6 +119,13 @@ func classifierPayload(c credential, r executorRequest, path string) ([]byte, []
 	if !systemIsPlainText(fields["system"]) {
 		return nil, routeUnfit("system prompt is not plain text the Router keeps whole")
 	}
+	// The transcript is the evidence being judged, and the same translation
+	// drops block types it does not know. Only text goes to the route.
+	for _, m := range messages {
+		if !messageIsPlainText(m) {
+			return nil, routeUnfit("a message carries content other than text, which the Router may drop")
+		}
+	}
 	slug, err := json.Marshal(c.Endpoint)
 	if err != nil {
 		return nil, routeUnfit("endpoint slug")
@@ -166,6 +173,34 @@ func replaceTopLevelValue(body []byte, key string, value []byte) ([]byte, error)
 	out = append(out, body[:start]...)
 	out = append(out, value...)
 	return append(out, body[end:]...), nil
+}
+
+// messageIsPlainText accepts a user or assistant message whose content is a
+// string or text blocks only.
+func messageIsPlainText(raw json.RawMessage) bool {
+	var m struct {
+		Role    string          `json:"role"`
+		Content json.RawMessage `json:"content"`
+	}
+	if json.Unmarshal(raw, &m) != nil || (m.Role != "user" && m.Role != "assistant") {
+		return false
+	}
+	content := bytes.TrimSpace(m.Content)
+	var s string
+	if json.Unmarshal(content, &s) == nil {
+		return true
+	}
+	var blocks []map[string]json.RawMessage
+	if json.Unmarshal(content, &blocks) != nil {
+		return false
+	}
+	for _, b := range blocks {
+		var kind, text string
+		if json.Unmarshal(b["type"], &kind) != nil || kind != "text" || json.Unmarshal(b["text"], &text) != nil {
+			return false
+		}
+	}
+	return true
 }
 
 func systemIsPlainText(raw json.RawMessage) bool {
