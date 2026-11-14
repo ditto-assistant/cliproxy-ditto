@@ -107,11 +107,114 @@ The credential CLIProxy loads looks like this; the key stays in its own file:
   Gemini-native clients (CLIProxy translates them to a format Ditto accepts),
   and a browser login (keys come from `heyditto`).
 
+## Auto Mode permission checks on another model (opt-in)
+
+Claude Code's Auto Mode asks a model to judge each tool call before it runs.
+Those checks are large (the security policy alone is tens of thousands of
+tokens) and are billed like any other request. This route can send them to a
+Ditto endpoint, for example one serving GLM Flash, while every other request
+stays on your subscriptions. It is off unless all three pieces below are in
+place, and it never decides a permission itself.
+
+**How a check is recognised.** `CLAUDE_CODE_AUTO_MODE_MODEL` names the
+classifier's model, and Claude Code reads it for nothing else.
+`heyditto claude --cliproxy --auto-mode-classifier <id>` (or
+`DITTO_AUTO_MODE_CLASSIFIER=<id>`, or `heyditto t3 setup --auto-mode-classifier
+<id>` for a T3 provider) sets it to a dedicated id, but only when CLIProxy lists
+that id; otherwise checks keep Claude Code's default model. It also turns on
+Claude Code's gateway hint headers, so the route can confirm each request is an
+`auxiliary` call rather than a main-loop or subagent turn that named the same id.
+Prompt text is never used to decide anything.
+
+**Pieces to put in place.**
+
+1. A classifier-safe endpoint: its model is the one you want answering, and
+   nothing recalls, records, compacts, injects a prompt or tools, or reroutes.
+   These are the Ditto Review endpoint's settings: `recallEnabled`,
+   `recordEnabled`, `recordTrace`, `recordAttachments`, `codeMode` and
+   `toolCompression` false; `contextCompaction`, `speculativeCompaction` and
+   `resultCompression` `off`; `precompactAtTokens` 0; `tools`, `kindRoutes`,
+   `subagentRoutes`, `failoverPolicy` and `aliases` empty (a new endpoint gets
+   default `kindRoutes`, so clear them); no `systemPrompt` and no
+   `claude_*`, `ditto_failover`, `cliproxy_relay` or `private_upstream_routing`
+   provider options. GLM Flash always reasons, so give it a reasoning control
+   (Review uses `providerOptions.reasoning_effort = "low"`).
+2. The credential: `DITTO_CLASSIFIER_MODEL=<id> scripts/connect.sh <endpoint>`.
+   It refuses an endpoint that is not classifier-safe, writes
+   `"classifier_model"` and priority 10 (ahead of the subscriptions), and takes
+   `DITTO_CLASSIFIER_MAX_INPUT_TOKENS` to keep checks larger than the model's
+   window with Claude. The credential serves only `<id>`; it never mirrors your
+   subscriptions' ids.
+3. The Claude fallback: your Claude subscriptions must also serve `<id>`, as
+   Sonnet, so that a check this route cannot carry is still judged by Claude:
+
+   ```yaml
+   oauth:              # config-version 8; older files spell it oauth-model-alias
+     model-alias:
+       claude:
+         - name: claude-sonnet-5
+           alias: <id>
+           fork: true  # keep claude-sonnet-5 itself available too
+   ```
+
+   Without it, a check the route refuses reaches Claude Code as an error and
+   Claude Code blocks that action. `test/e2e/classifier.sh` proves the
+   fallback with a Claude API-key credential's `models` alias, the same
+   routing for a credential that is not OAuth.
+
+**What happens to a check.**
+
+| Situation | Outcome |
+|---|---|
+| An `auxiliary`, non-streaming Messages request for `<id>` with a plain-text system prompt and no tools | Sent to the endpoint with only `model` changed to the endpoint slug; every other byte is forwarded as Claude Code sent it. The reply comes back untouched. |
+| Another request class, no class header, streaming, tools, an unreadable system prompt, a message with anything but text, a duplicate `model`, or over `max_input_tokens` | Refused before any Router call; CLIProxy sends the same request to the Claude fallback. |
+| Router 400, 404, 413 or 422 (for example a prompt too long for the model) | Same fallback, with no cooldown, so later checks still try the endpoint first. |
+| Router 401, 402, 429, 5xx or unreachable | CLIProxy's usual failover to the Claude fallback, and this credential cools down. |
+| A 200 with no text or a provider refusal | Same fallback: Claude Code could not have parsed a verdict from it. |
+| A 200 with any text | Returned as is. Claude Code parses the verdict and blocks on anything it cannot parse; this route never judges the text. |
+
+The refusals carry `ditto_classifier_route_unfit`, and the credential gives
+CLIProxy a request-scoped rule (`continue`, no cooldown) for exactly that.
+
+**Before you rely on it.** For a non-Claude id, Claude Code uses its older
+two-stage `<block>yes|no` verdict instead of the per-model severity scores it
+uses for Sonnet, and that applies to the Claude fallback too. On a GLM
+endpoint the Router translates the check to Chat Completions: system text
+blocks are joined and `cache_control` is dropped, so the content is complete
+but the bytes are not identical, and Anthropic prompt-cache hits do not carry
+over. Measure false approvals, false blocks, malformed replies, timeouts and
+latency on your own fixtures before turning it on.
+
+**Where the data goes.** With the route on, every permission check leaves
+your machine: the security policy and the session transcript the
+classifier judges, which includes tool inputs and outputs and so can hold
+file contents or secrets, go to Ditto Router and on to the endpoint model's
+provider. `classifier_safe.py` checks that the Router neither remembers nor
+records them; it cannot see the provider's retention or training terms.
+Check those for the provider the endpoint actually routes to, and use a
+provider setting that denies data collection where one exists, before you
+turn the route on.
+
+**Upkeep.** `connect.sh` checks the endpoint once. Re-check it after any
+edit to the endpoint, and from time to time, since the Router can gain
+settings this check does not know about:
+`heyditto endpoints show <endpoint> --output json | python3 -I scripts/classifier_safe.py`.
+
+**Rollback**, in this order. First launch without `--auto-mode-classifier`
+(or re-run `heyditto t3 setup` without it) and restart running chats, which
+keep the id they started with; checks return to Claude Code's default
+classifier. Then delete the credential file or set `"disabled": true`; any
+check still naming the id goes to the Claude fallback. Drop the alias last,
+if at all. Removing it while the credential is live leaves every refused
+check without a fallback, and Claude Code blocks those actions.
+
 ## Development
 
 ```bash
 go vet ./... && go test ./...
 bash test/e2e/run.sh            # downloads the CLIProxyAPI release for this OS/arch
+bash test/e2e/classifier.sh     # the Auto Mode classifier route, its Claude fallback and refusals
+python3 -I -m unittest discover -s test -p 'classifier_safe_test.py'
 ```
 
 The end-to-end test loads the plugin into a real CLIProxyAPI release next to a

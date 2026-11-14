@@ -161,8 +161,23 @@ func execute(raw []byte) ([]byte, error) {
 	if bad != nil {
 		return bad, nil
 	}
+	if c, err := decodeCredential(r.StorageJSON); err == nil && c.ClassifierModel != "" {
+		payload, refusal := classifierPayload(c, r, path)
+		if refusal != nil {
+			return refusal, nil
+		}
+		r.Payload = payload
+		// Claude Code abandons a check long before this; the deadline only
+		// stops a stuck Router call from outliving it by minutes.
+		ctx, cancel := context.WithTimeout(context.Background(), classifierTimeout)
+		defer cancel()
+		return roundTripWith(ctx, r, path, classifierUpstreamError, classifierReplyUnfit)
+	}
 	return roundTrip(r, path)
 }
+
+// classifierTimeout bounds one permission check on the Router.
+const classifierTimeout = 2 * time.Minute
 
 func countTokens(raw []byte) ([]byte, error) {
 	r, path, bad := decodeExecutorRequest(raw)
@@ -172,12 +187,21 @@ func countTokens(raw []byte) ([]byte, error) {
 	if path != "/v1/messages" {
 		return errorEnvelope("unsupported", "Ditto counts tokens only for Anthropic Messages requests", 404), nil
 	}
+	if c, err := decodeCredential(r.StorageJSON); err == nil && c.ClassifierModel != "" {
+		return routeUnfit("token counting is not part of a permission check"), nil
+	}
 	r.Stream = false
 	return roundTrip(r, "/v1/messages/count_tokens")
 }
 
 func roundTrip(r executorRequest, path string) ([]byte, error) {
-	req, err := buildUpstream(context.Background(), r, path)
+	return roundTripWith(context.Background(), r, path, upstreamError, nil)
+}
+
+// roundTripWith sends one request; mapError renders a non-2xx answer and
+// replyUnfit, when set, may turn an unusable 2xx reply into a route refusal.
+func roundTripWith(ctx context.Context, r executorRequest, path string, mapError func(int, []byte) []byte, replyUnfit func([]byte) string) ([]byte, error) {
+	req, err := buildUpstream(ctx, r, path)
 	if err != nil {
 		return errorEnvelope("invalid_credential", err.Error(), 401), nil
 	}
@@ -191,7 +215,12 @@ func roundTrip(r executorRequest, path string) ([]byte, error) {
 		return transportError(err), nil
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return upstreamError(resp.StatusCode, body), nil
+		return mapError(resp.StatusCode, body), nil
+	}
+	if replyUnfit != nil {
+		if reason := replyUnfit(body); reason != "" {
+			return routeUnfit(reason), nil
+		}
 	}
 	return okEnvelope(pluginapi.ExecutorResponse{Payload: body, Headers: responseHeaders(resp.Header)})
 }
@@ -220,6 +249,10 @@ func executeStream(raw []byte) ([]byte, error) {
 	}
 	if strings.TrimSpace(r.StreamID) == "" {
 		return errorEnvelope("executor_error", "stream_id is required for executor.execute_stream", 0), nil
+	}
+	if c, err := decodeCredential(r.StorageJSON); err == nil && c.ClassifierModel != "" {
+		// Claude Code's classifier never streams; this route carries no streams.
+		return routeUnfit("streaming; Claude Code's classifier does not stream"), nil
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	req, err := buildUpstream(ctx, r, path)
